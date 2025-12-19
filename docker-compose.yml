@@ -1,0 +1,114 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: dna-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-dna}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-dna_secret}
+      POSTGRES_DB: ${POSTGRES_DB:-dna}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-dna}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  migrate:
+    image: postgres:16-alpine
+    container_name: dna-migrate
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGHOST: postgres
+      PGUSER: ${POSTGRES_USER:-dna}
+      PGPASSWORD: ${POSTGRES_PASSWORD:-dna_secret}
+      PGDATABASE: ${POSTGRES_DB:-dna}
+    volumes:
+      - ./api/migrations:/migrations:ro
+    entrypoint: >
+      sh -c '
+        for f in /migrations/*.sql; do
+          echo "Running $$f..."
+          psql -f "$$f" 2>/dev/null || true
+        done
+        echo "Migrations complete"
+      '
+    restart: "no"
+
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    container_name: dna-api
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-dna}:${POSTGRES_PASSWORD:-dna_secret}@postgres:5432/${POSTGRES_DB:-dna}?sslmode=disable
+      API_PORT: "9000"
+      JWT_SECRET: ${JWT_SECRET:-change-in-production}
+      AUTH_PASSWORD_DENIS: ${AUTH_PASSWORD_DENIS}
+      AUTH_PASSWORD_NASTYA: ${AUTH_PASSWORD_NASTYA}
+      TZ: ${TZ:-Europe/Moscow}
+    ports:
+      - "9000:9000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    volumes:
+      - ./api/migrations:/app/migrations:ro
+
+  bot:
+    build:
+      context: ./bot
+      dockerfile: Dockerfile
+    container_name: dna-bot
+    environment:
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      API_BASE_URL: http://api:9000
+      WEBAPP_URL: ${WEBAPP_URL:-https://dna-relations.website/miniapp}
+      TZ: ${TZ:-Europe/Moscow}
+    depends_on:
+      - api
+    restart: unless-stopped
+
+  miniapp:
+    build:
+      context: ./miniapp
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE: /api/v1
+    container_name: dna-miniapp
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE: /api/v1
+    container_name: dna-web
+    restart: unless-stopped
+
+  nginx:
+    image: nginx:alpine
+    container_name: dna-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - api
+      - miniapp
+      - web
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
