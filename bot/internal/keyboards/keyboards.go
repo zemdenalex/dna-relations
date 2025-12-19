@@ -20,16 +20,26 @@ func MainMenu() tgbotapi.ReplyKeyboardMarkup {
 }
 
 func MainMenuWithWebApp(webappURL string) tgbotapi.ReplyKeyboardMarkup {
-	return tgbotapi.NewReplyKeyboard(
-		tgbotapi.NewKeyboardButtonRow(
-			tgbotapi.NewKeyboardButton("Topics"),
-			tgbotapi.NewKeyboardButton("Calendar"),
-		),
-		tgbotapi.NewKeyboardButtonRow(
-			tgbotapi.NewKeyboardButton("Notes"),
-			tgbotapi.NewKeyboardButtonWebApp("Open App", tgbotapi.WebAppInfo{URL: webappURL}),
-		),
-	)
+	webAppButton := tgbotapi.KeyboardButton{
+		Text: "Open App",
+		WebApp: &tgbotapi.WebAppInfo{
+			URL: webappURL,
+		},
+	}
+
+	return tgbotapi.ReplyKeyboardMarkup{
+		Keyboard: [][]tgbotapi.KeyboardButton{
+			{
+				tgbotapi.NewKeyboardButton("Topics"),
+				tgbotapi.NewKeyboardButton("Calendar"),
+			},
+			{
+				tgbotapi.NewKeyboardButton("Notes"),
+				webAppButton,
+			},
+		},
+		ResizeKeyboard: true,
+	}
 }
 
 func TopicsMenu() tgbotapi.InlineKeyboardMarkup {
@@ -103,11 +113,18 @@ func NotesMenuExtended() tgbotapi.InlineKeyboardMarkup {
 }
 
 func WebAppButton(url string) tgbotapi.InlineKeyboardMarkup {
-	return tgbotapi.NewInlineKeyboardMarkup(
-		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonWebApp("Open DNA App", tgbotapi.WebAppInfo{URL: url}),
-		),
-	)
+	webAppButton := tgbotapi.InlineKeyboardButton{
+		Text: "Open DNA App",
+		WebApp: &tgbotapi.WebAppInfo{
+			URL: url,
+		},
+	}
+
+	return tgbotapi.InlineKeyboardMarkup{
+		InlineKeyboard: [][]tgbotapi.InlineKeyboardButton{
+			{webAppButton},
+		},
+	}
 }
 
 func truncate(s string, maxLen int) string {
