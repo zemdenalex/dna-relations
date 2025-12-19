@@ -123,20 +123,22 @@ func (c *Client) GetEvents(from, to string) ([]Event, error) {
 	return resp.Events, nil
 }
 
-func (c *Client) CreateNote(title, content, noteType string) (*Note, error) {
+func (c *Client) CreateEvent(title, description string, startAt, endAt time.Time) (*Event, error) {
 	body := map[string]interface{}{
-		"title":     title,
-		"content":   content,
-		"note_type": noteType,
-		"shared":    true,
+		"title":       title,
+		"description": description,
+		"start_at":    startAt.Format(time.RFC3339),
+		"end_at":      endAt.Format(time.RFC3339),
+		"all_day":     false,
+		"shared":      true,
 	}
 	var resp struct {
-		Note Note `json:"note"`
+		Event Event `json:"event"`
 	}
-	if err := c.post("/api/v1/notes", body, &resp); err != nil {
+	if err := c.post("/api/v1/events", body, &resp); err != nil {
 		return nil, err
 	}
-	return &resp.Note, nil
+	return &resp.Event, nil
 }
 
 func (c *Client) GetNotes(noteType string, limit int) ([]Note, error) {
@@ -152,6 +154,22 @@ func (c *Client) GetNotes(noteType string, limit int) ([]Note, error) {
 		return nil, err
 	}
 	return resp.Notes, nil
+}
+
+func (c *Client) CreateNote(title, content, noteType string) (*Note, error) {
+	body := map[string]interface{}{
+		"title":     title,
+		"content":   content,
+		"note_type": noteType,
+		"shared":    true,
+	}
+	var resp struct {
+		Note Note `json:"note"`
+	}
+	if err := c.post("/api/v1/notes", body, &resp); err != nil {
+		return nil, err
+	}
+	return &resp.Note, nil
 }
 
 func (c *Client) get(path string, result interface{}) error {

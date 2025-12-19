@@ -19,6 +19,19 @@ func MainMenu() tgbotapi.ReplyKeyboardMarkup {
 	)
 }
 
+func MainMenuWithWebApp(webappURL string) tgbotapi.ReplyKeyboardMarkup {
+	return tgbotapi.NewReplyKeyboard(
+		tgbotapi.NewKeyboardButtonRow(
+			tgbotapi.NewKeyboardButton("Topics"),
+			tgbotapi.NewKeyboardButton("Calendar"),
+		),
+		tgbotapi.NewKeyboardButtonRow(
+			tgbotapi.NewKeyboardButton("Notes"),
+			tgbotapi.NewKeyboardButtonWebApp("Open App", tgbotapi.WebAppInfo{URL: webappURL}),
+		),
+	)
+}
+
 func TopicsMenu() tgbotapi.InlineKeyboardMarkup {
 	return tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
@@ -48,7 +61,7 @@ func TopicsMenuExtended(topics []TopicInfo) tgbotapi.InlineKeyboardMarkup {
 		if t.Status == "pending" {
 			rows = append(rows, tgbotapi.NewInlineKeyboardRow(
 				tgbotapi.NewInlineKeyboardButtonData(
-					fmt.Sprintf("✓ %s", truncate(t.Title, 25)),
+					fmt.Sprintf("Mark discussed: %s", truncate(t.Title, 20)),
 					fmt.Sprintf("topic_discuss:%d", t.ID),
 				),
 			))
@@ -63,6 +76,9 @@ func CalendarMenu() tgbotapi.InlineKeyboardMarkup {
 		tgbotapi.NewInlineKeyboardRow(
 			tgbotapi.NewInlineKeyboardButtonData("Today", "calendar_today"),
 			tgbotapi.NewInlineKeyboardButtonData("This Week", "calendar_week"),
+		),
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("Add Event", "calendar_add"),
 		),
 	)
 }
@@ -89,7 +105,7 @@ func NotesMenuExtended() tgbotapi.InlineKeyboardMarkup {
 func WebAppButton(url string) tgbotapi.InlineKeyboardMarkup {
 	return tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonURL("Open DNA App", url),
+			tgbotapi.NewInlineKeyboardButtonWebApp("Open DNA App", tgbotapi.WebAppInfo{URL: url}),
 		),
 	)
 }

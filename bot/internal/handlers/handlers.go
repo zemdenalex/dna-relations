@@ -78,6 +78,14 @@ func (h *Handler) handleCommand(msg *tgbotapi.Message) {
 		h.cmdHelp(msg)
 	case "login":
 		h.cmdLogin(msg)
+	case "logout":
+		h.cmdLogout(msg)
+	case "today":
+		h.cmdToday(msg)
+	case "newtopic":
+		h.cmdNewTopic(msg)
+	case "newnote":
+		h.cmdNewNote(msg)
 	default:
 		h.sendText(msg.Chat.ID, "Unknown command. Use /help to see available commands.")
 	}
@@ -98,6 +106,12 @@ func (h *Handler) handleText(msg *tgbotapi.Message) {
 		return
 	case "awaiting_note_content":
 		h.handleNoteContentInput(msg)
+		return
+	case "awaiting_event_title":
+		h.handleEventTitleInput(msg)
+		return
+	case "awaiting_event_datetime":
+		h.handleEventDatetimeInput(msg)
 		return
 	}
 
@@ -137,6 +151,8 @@ func (h *Handler) HandleCallback(cb *tgbotapi.CallbackQuery) {
 		h.showTodayEvents(cb.Message.Chat.ID)
 	case "calendar_week":
 		h.showWeekEvents(cb.Message.Chat.ID)
+	case "calendar_add":
+		h.startAddEvent(cb.Message.Chat.ID)
 	case "notes_list":
 		h.showNotesList(cb.Message.Chat.ID, "")
 	case "notes_rules":
@@ -152,7 +168,16 @@ func (h *Handler) cmdStart(msg *tgbotapi.Message) {
 	state := h.getState(msg.Chat.ID)
 
 	if !state.LoggedIn {
-		h.sendText(msg.Chat.ID, "Welcome to DNA Relations!\n\nPlease login first. Use /login command.")
+		text := `Welcome to DNA Relations!
+
+This bot helps you and your partner manage:
+- Topics to discuss
+- Shared calendar
+- Notes and ideas
+- Daily rituals
+
+Please login first with /login`
+		h.sendText(msg.Chat.ID, text)
 		return
 	}
 
@@ -164,8 +189,31 @@ func (h *Handler) cmdStart(msg *tgbotapi.Message) {
 
 func (h *Handler) cmdLogin(msg *tgbotapi.Message) {
 	state := h.getState(msg.Chat.ID)
+	
+	if state.LoggedIn {
+		h.sendText(msg.Chat.ID, fmt.Sprintf("Already logged in as %s. Use /logout first.", state.Username))
+		return
+	}
+	
 	state.Action = "awaiting_login"
 	h.sendText(msg.Chat.ID, "Enter your credentials in format:\nusername password\n\nExample: denis mypassword")
+}
+
+func (h *Handler) cmdLogout(msg *tgbotapi.Message) {
+	state := h.getState(msg.Chat.ID)
+	
+	if !state.LoggedIn {
+		h.sendText(msg.Chat.ID, "Not logged in.")
+		return
+	}
+	
+	state.LoggedIn = false
+	state.UserID = 0
+	state.Username = ""
+	state.Action = ""
+	state.Data = make(map[string]interface{})
+	
+	h.sendText(msg.Chat.ID, "Logged out successfully. Use /login to login again.")
 }
 
 func (h *Handler) handleLoginInput(msg *tgbotapi.Message) {
@@ -180,8 +228,9 @@ func (h *Handler) handleLoginInput(msg *tgbotapi.Message) {
 	username, password := parts[0], parts[1]
 	resp, err := h.apiClient.Login(username, password)
 	if err != nil {
-		h.sendText(msg.Chat.ID, "Login failed. Check your credentials.")
-		log.Printf("Login error: %v", err)
+		h.sendText(msg.Chat.ID, fmt.Sprintf("Login failed: %v", err))
+		log.Printf("Login error for %s: %v", username, err)
+		state.Action = ""
 		return
 	}
 
@@ -192,7 +241,7 @@ func (h *Handler) handleLoginInput(msg *tgbotapi.Message) {
 
 	text := fmt.Sprintf("Logged in as %s!\n\nUse the menu below to navigate.", state.Username)
 	reply := tgbotapi.NewMessage(msg.Chat.ID, text)
-	reply.ReplyMarkup = keyboards.MainMenu()
+	reply.ReplyMarkup = keyboards.MainMenuWithWebApp(h.webappURL)
 	h.bot.Send(reply)
 }
 
@@ -206,6 +255,15 @@ func (h *Handler) cmdTopics(msg *tgbotapi.Message) {
 	h.showTopicsList(msg.Chat.ID, "pending")
 }
 
+func (h *Handler) cmdNewTopic(msg *tgbotapi.Message) {
+	state := h.getState(msg.Chat.ID)
+	if !state.LoggedIn {
+		h.sendText(msg.Chat.ID, "Please /login first")
+		return
+	}
+	h.startAddTopic(msg.Chat.ID)
+}
+
 func (h *Handler) showTopicsList(chatID int64, status string) {
 	topics, err := h.apiClient.GetTopics(status, 10)
 	if err != nil {
@@ -217,9 +275,13 @@ func (h *Handler) showTopicsList(chatID int64, status string) {
 	if len(topics) == 0 {
 		text = fmt.Sprintf("No %s topics.\n\nUse buttons below:", status)
 	} else {
-		text = fmt.Sprintf("%s topics:\n\n", strings.Title(status))
+		text = fmt.Sprintf("<b>%s topics:</b>\n\n", strings.Title(status))
 		for i, t := range topics {
-			text += fmt.Sprintf("%d. [P%d] %s\n", i+1, t.Priority, t.Title)
+			priorityLabel := priorityLabels[t.Priority]
+			text += fmt.Sprintf("%d. <b>[%s]</b> %s\n", i+1, priorityLabel, t.Title)
+			if t.Description != "" {
+				text += fmt.Sprintf("   <i>%s</i>\n", truncate(t.Description, 50))
+			}
 		}
 	}
 
@@ -234,6 +296,7 @@ func (h *Handler) showTopicsList(chatID int64, status string) {
 	}
 
 	reply := tgbotapi.NewMessage(chatID, text)
+	reply.ParseMode = "HTML"
 	reply.ReplyMarkup = keyboards.TopicsMenuExtended(topicInfos)
 	h.bot.Send(reply)
 }
@@ -241,14 +304,28 @@ func (h *Handler) showTopicsList(chatID int64, status string) {
 func (h *Handler) startAddTopic(chatID int64) {
 	state := h.getState(chatID)
 	state.Action = "awaiting_topic_title"
-	h.sendText(chatID, "Enter topic title:")
+	h.sendText(chatID, "Enter topic title (and optionally description on new line):\n\nExample:\nDiscuss vacation plans\nWe need to decide dates and destination")
 }
 
 func (h *Handler) handleTopicTitleInput(msg *tgbotapi.Message) {
 	state := h.getState(msg.Chat.ID)
-	state.Data["topic_title"] = msg.Text
+	
+	lines := strings.SplitN(msg.Text, "\n", 2)
+	title := strings.TrimSpace(lines[0])
+	description := ""
+	if len(lines) > 1 {
+		description = strings.TrimSpace(lines[1])
+	}
+	
+	state.Data["topic_title"] = title
+	state.Data["topic_description"] = description
 	state.Action = "awaiting_topic_priority"
-	h.sendText(msg.Chat.ID, "Enter priority (0-5):\n0 - Buffer\n1 - Emergency\n2 - ASAP\n3 - Must discuss\n4 - Soon\n5 - When possible")
+	
+	text := "Enter priority (0-5):\n"
+	for i := 0; i <= 5; i++ {
+		text += fmt.Sprintf("%d - %s\n", i, priorityLabels[i])
+	}
+	h.sendText(msg.Chat.ID, text)
 }
 
 func (h *Handler) handleTopicPriorityInput(msg *tgbotapi.Message) {
@@ -262,7 +339,12 @@ func (h *Handler) handleTopicPriorityInput(msg *tgbotapi.Message) {
 	}
 
 	title := state.Data["topic_title"].(string)
-	topic, err := h.apiClient.CreateTopic(title, "", priority)
+	description := ""
+	if desc, ok := state.Data["topic_description"].(string); ok {
+		description = desc
+	}
+	
+	topic, err := h.apiClient.CreateTopic(title, description, priority)
 	if err != nil {
 		h.sendText(msg.Chat.ID, "Failed to create topic: "+err.Error())
 		state.Action = ""
@@ -271,7 +353,7 @@ func (h *Handler) handleTopicPriorityInput(msg *tgbotapi.Message) {
 
 	state.Action = ""
 	state.Data = make(map[string]interface{})
-	h.sendText(msg.Chat.ID, fmt.Sprintf("✅ Topic created: %s (P%d)", topic.Title, topic.Priority))
+	h.sendText(msg.Chat.ID, fmt.Sprintf("Topic created: <b>%s</b>\nPriority: %s", topic.Title, priorityLabels[topic.Priority]))
 }
 
 func (h *Handler) markTopicDiscussed(chatID int64, idStr string) {
@@ -284,7 +366,7 @@ func (h *Handler) markTopicDiscussed(chatID int64, idStr string) {
 		return
 	}
 
-	h.sendText(chatID, fmt.Sprintf("✅ Marked as discussed: %s", topic.Title))
+	h.sendText(chatID, fmt.Sprintf("Marked as discussed: <b>%s</b>", topic.Title))
 	h.showTopicsList(chatID, "pending")
 }
 
@@ -295,9 +377,18 @@ func (h *Handler) cmdCalendar(msg *tgbotapi.Message) {
 		return
 	}
 
-	reply := tgbotapi.NewMessage(msg.Chat.ID, "📅 Calendar:")
+	reply := tgbotapi.NewMessage(msg.Chat.ID, "Calendar:")
 	reply.ReplyMarkup = keyboards.CalendarMenu()
 	h.bot.Send(reply)
+}
+
+func (h *Handler) cmdToday(msg *tgbotapi.Message) {
+	state := h.getState(msg.Chat.ID)
+	if !state.LoggedIn {
+		h.sendText(msg.Chat.ID, "Please /login first")
+		return
+	}
+	h.showTodayEvents(msg.Chat.ID)
 }
 
 func (h *Handler) showTodayEvents(chatID int64) {
@@ -311,16 +402,22 @@ func (h *Handler) showTodayEvents(chatID int64) {
 	}
 
 	if len(events) == 0 {
-		h.sendText(chatID, "No events today. 🎉")
+		h.sendText(chatID, fmt.Sprintf("<b>Today (%s)</b>\n\nNo events scheduled.", time.Now().Format("Monday, January 2")))
 		return
 	}
 
-	text := "📅 Today's events:\n\n"
+	text := fmt.Sprintf("<b>Today (%s)</b>\n\n", time.Now().Format("Monday, January 2"))
 	for _, e := range events {
 		timeStr := e.StartAt.Format("15:04")
-		text += fmt.Sprintf("• %s - %s\n", timeStr, e.Title)
+		text += fmt.Sprintf("• <b>%s</b> - %s\n", timeStr, e.Title)
+		if e.Description != "" {
+			text += fmt.Sprintf("  <i>%s</i>\n", truncate(e.Description, 50))
+		}
 	}
-	h.sendText(chatID, text)
+	
+	reply := tgbotapi.NewMessage(chatID, text)
+	reply.ParseMode = "HTML"
+	h.bot.Send(reply)
 }
 
 func (h *Handler) showWeekEvents(chatID int64) {
@@ -334,16 +431,70 @@ func (h *Handler) showWeekEvents(chatID int64) {
 	}
 
 	if len(events) == 0 {
-		h.sendText(chatID, "No events this week.")
+		h.sendText(chatID, "<b>This Week</b>\n\nNo events scheduled.")
 		return
 	}
 
-	text := "📅 This week's events:\n\n"
+	text := "<b>This Week's Events</b>\n\n"
+	
+	eventsByDay := make(map[string][]api.Event)
 	for _, e := range events {
-		dateStr := e.StartAt.Format("Mon 02 Jan 15:04")
-		text += fmt.Sprintf("• %s - %s\n", dateStr, e.Title)
+		day := e.StartAt.Format("2006-01-02")
+		eventsByDay[day] = append(eventsByDay[day], e)
 	}
-	h.sendText(chatID, text)
+	
+	for i := 0; i < 7; i++ {
+		day := time.Now().AddDate(0, 0, i)
+		dayStr := day.Format("2006-01-02")
+		if dayEvents, ok := eventsByDay[dayStr]; ok {
+			text += fmt.Sprintf("<b>%s</b>\n", day.Format("Mon, Jan 2"))
+			for _, e := range dayEvents {
+				text += fmt.Sprintf("  %s - %s\n", e.StartAt.Format("15:04"), e.Title)
+			}
+			text += "\n"
+		}
+	}
+	
+	reply := tgbotapi.NewMessage(chatID, text)
+	reply.ParseMode = "HTML"
+	h.bot.Send(reply)
+}
+
+func (h *Handler) startAddEvent(chatID int64) {
+	state := h.getState(chatID)
+	state.Action = "awaiting_event_title"
+	h.sendText(chatID, "Enter event title:")
+}
+
+func (h *Handler) handleEventTitleInput(msg *tgbotapi.Message) {
+	state := h.getState(msg.Chat.ID)
+	state.Data["event_title"] = msg.Text
+	state.Action = "awaiting_event_datetime"
+	h.sendText(msg.Chat.ID, "Enter date and time:\nFormat: YYYY-MM-DD HH:MM\n\nExample: 2025-12-25 19:00")
+}
+
+func (h *Handler) handleEventDatetimeInput(msg *tgbotapi.Message) {
+	state := h.getState(msg.Chat.ID)
+	
+	startTime, err := time.Parse("2006-01-02 15:04", strings.TrimSpace(msg.Text))
+	if err != nil {
+		h.sendText(msg.Chat.ID, "Invalid format. Use: YYYY-MM-DD HH:MM\nExample: 2025-12-25 19:00")
+		return
+	}
+	
+	title := state.Data["event_title"].(string)
+	endTime := startTime.Add(1 * time.Hour)
+	
+	event, err := h.apiClient.CreateEvent(title, "", startTime, endTime)
+	if err != nil {
+		h.sendText(msg.Chat.ID, "Failed to create event: "+err.Error())
+		state.Action = ""
+		return
+	}
+	
+	state.Action = ""
+	state.Data = make(map[string]interface{})
+	h.sendText(msg.Chat.ID, fmt.Sprintf("Event created: <b>%s</b>\n%s", event.Title, startTime.Format("Mon, Jan 2 at 15:04")))
 }
 
 func (h *Handler) cmdNotes(msg *tgbotapi.Message) {
@@ -353,9 +504,18 @@ func (h *Handler) cmdNotes(msg *tgbotapi.Message) {
 		return
 	}
 
-	reply := tgbotapi.NewMessage(msg.Chat.ID, "📝 Notes:")
+	reply := tgbotapi.NewMessage(msg.Chat.ID, "Notes:")
 	reply.ReplyMarkup = keyboards.NotesMenuExtended()
 	h.bot.Send(reply)
+}
+
+func (h *Handler) cmdNewNote(msg *tgbotapi.Message) {
+	state := h.getState(msg.Chat.ID)
+	if !state.LoggedIn {
+		h.sendText(msg.Chat.ID, "Please /login first")
+		return
+	}
+	h.startAddNote(msg.Chat.ID)
 }
 
 func (h *Handler) showNotesList(chatID int64, noteType string) {
@@ -370,7 +530,7 @@ func (h *Handler) showNotesList(chatID int64, noteType string) {
 		return
 	}
 
-	text := "📝 Notes:\n\n"
+	text := "<b>Notes</b>\n\n"
 	for i, n := range notes {
 		title := n.Title
 		if title == "" {
@@ -378,23 +538,36 @@ func (h *Handler) showNotesList(chatID int64, noteType string) {
 		}
 		pinned := ""
 		if n.IsPinned {
-			pinned = "📌 "
+			pinned = " [pinned]"
 		}
-		text += fmt.Sprintf("%d. %s[%s] %s\n", i+1, pinned, n.NoteType, title)
+		text += fmt.Sprintf("%d. <b>%s</b>%s\n", i+1, title, pinned)
+		if n.Content != "" && n.Title != "" {
+			text += fmt.Sprintf("   <i>%s</i>\n", truncate(n.Content, 40))
+		}
 	}
-	h.sendText(chatID, text)
+	
+	reply := tgbotapi.NewMessage(chatID, text)
+	reply.ParseMode = "HTML"
+	h.bot.Send(reply)
 }
 
 func (h *Handler) startAddNote(chatID int64) {
 	state := h.getState(chatID)
 	state.Action = "awaiting_note_content"
-	h.sendText(chatID, "Enter note content:")
+	h.sendText(chatID, "Enter note (first line = title, rest = content):\n\nExample:\nGrocery list\n- Milk\n- Bread\n- Eggs")
 }
 
 func (h *Handler) handleNoteContentInput(msg *tgbotapi.Message) {
 	state := h.getState(msg.Chat.ID)
 
-	note, err := h.apiClient.CreateNote("", msg.Text, "general")
+	lines := strings.SplitN(msg.Text, "\n", 2)
+	title := strings.TrimSpace(lines[0])
+	content := ""
+	if len(lines) > 1 {
+		content = strings.TrimSpace(lines[1])
+	}
+
+	note, err := h.apiClient.CreateNote(title, content, "general")
 	if err != nil {
 		h.sendText(msg.Chat.ID, "Failed to create note: "+err.Error())
 		state.Action = ""
@@ -402,7 +575,7 @@ func (h *Handler) handleNoteContentInput(msg *tgbotapi.Message) {
 	}
 
 	state.Action = ""
-	h.sendText(msg.Chat.ID, fmt.Sprintf("✅ Note created (ID: %d)", note.ID))
+	h.sendText(msg.Chat.ID, fmt.Sprintf("Note created: <b>%s</b>", note.Title))
 }
 
 func (h *Handler) cmdApp(msg *tgbotapi.Message) {
@@ -411,27 +584,42 @@ func (h *Handler) cmdApp(msg *tgbotapi.Message) {
 		return
 	}
 
-	reply := tgbotapi.NewMessage(msg.Chat.ID, "Open the mini app:")
+	reply := tgbotapi.NewMessage(msg.Chat.ID, "Open the DNA app:")
 	reply.ReplyMarkup = keyboards.WebAppButton(h.webappURL)
 	h.bot.Send(reply)
 }
 
 func (h *Handler) cmdHelp(msg *tgbotapi.Message) {
-	text := `Available commands:
+	text := `<b>Available commands:</b>
 
+<b>Auth:</b>
 /login - Login to your account
-/start - Show main menu
+/logout - Logout
+
+<b>Topics:</b>
 /topics - View discussion topics
-/calendar - View calendar
+/newtopic - Create new topic
+
+<b>Calendar:</b>
+/calendar - View calendar menu
+/today - Today's events
+
+<b>Notes:</b>
 /notes - View notes
+/newnote - Create new note
+
+<b>Other:</b>
 /app - Open mini app
 /help - Show this help`
 
-	h.sendText(msg.Chat.ID, text)
+	reply := tgbotapi.NewMessage(msg.Chat.ID, text)
+	reply.ParseMode = "HTML"
+	h.bot.Send(reply)
 }
 
 func (h *Handler) sendText(chatID int64, text string) {
 	msg := tgbotapi.NewMessage(chatID, text)
+	msg.ParseMode = "HTML"
 	h.bot.Send(msg)
 }
 

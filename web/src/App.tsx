@@ -1,33 +1,94 @@
-import { Routes, Route } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { AuthProvider, useAuth } from './contexts/AuthContext'
 import Layout from './components/Layout'
-import HomePage from './pages/Home'
+import Login from './pages/Login'
+import Dashboard from './pages/Dashboard'
+import Topics from './pages/Topics'
+import Calendar from './pages/Calendar'
+import Notes from './pages/Notes'
 
-function App() {
+function ProtectedRoute({ children }: { children: React.ReactNode }) {
+  const { user, loading } = useAuth()
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gray-900 flex items-center justify-center">
+        <div className="text-white">Loading...</div>
+      </div>
+    )
+  }
+
+  if (!user) {
+    return <Navigate to="/login" replace />
+  }
+
+  return <>{children}</>
+}
+
+function AppRoutes() {
+  const { user, loading } = useAuth()
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gray-900 flex items-center justify-center">
+        <div className="text-white">Loading...</div>
+      </div>
+    )
+  }
+
   return (
     <Routes>
-      <Route path="/" element={<Layout />}>
-        <Route index element={<HomePage />} />
-        <Route path="topics" element={<Stub name="Topics" />} />
-        <Route path="calendar" element={<Stub name="Calendar" />} />
-        <Route path="notes" element={<Stub name="Notes" />} />
-        <Route path="favorites" element={<Stub name="Favorites" />} />
-        <Route path="media" element={<Stub name="Media Sync" />} />
-        <Route path="settings" element={<Stub name="Settings" />} />
-        <Route path="login" element={<Stub name="Login" />} />
-      </Route>
+      <Route path="/login" element={user ? <Navigate to="/" replace /> : <Login />} />
+      <Route
+        path="/"
+        element={
+          <ProtectedRoute>
+            <Layout>
+              <Dashboard />
+            </Layout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/topics"
+        element={
+          <ProtectedRoute>
+            <Layout>
+              <Topics />
+            </Layout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/calendar"
+        element={
+          <ProtectedRoute>
+            <Layout>
+              <Calendar />
+            </Layout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/notes"
+        element={
+          <ProtectedRoute>
+            <Layout>
+              <Notes />
+            </Layout>
+          </ProtectedRoute>
+        }
+      />
     </Routes>
   )
 }
 
-function Stub({ name }: { name: string }) {
+export default function App() {
   return (
-    <div className="flex items-center justify-center h-64">
-      <div className="text-center">
-        <h1 className="text-2xl font-bold mb-2">{name}</h1>
-        <p className="text-gray-400">[stub] Not implemented</p>
-      </div>
-    </div>
+    <BrowserRouter>
+      <AuthProvider>
+        <AppRoutes />
+      </AuthProvider>
+    </BrowserRouter>
   )
 }
-
-export default App
