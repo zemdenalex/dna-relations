@@ -1,205 +1,320 @@
-import { useEffect, useState } from 'react'
-import { api, CalendarEvent } from '../api/client'
+import { useState, useEffect } from 'react'
+import { Link } from 'react-router-dom'
+import { api, CalendarEvent, CreateEventRequest } from '../api/client'
+
+const weekDays = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс']
+const monthNames = [
+  'Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь',
+  'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'
+]
+
+const eventColors = [
+  '#6366f1', '#ec4899', '#22c55e', '#f97316', '#8b5cf6', '#ef4444'
+]
 
 export default function Calendar() {
   const [events, setEvents] = useState<CalendarEvent[]>([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [currentDate, setCurrentDate] = useState(new Date())
+  const [view, setView] = useState<'week' | 'month'>('week')
   const [showForm, setShowForm] = useState(false)
-  const [currentWeekStart, setCurrentWeekStart] = useState(() => {
-    const now = new Date()
-    const day = now.getDay()
-    const diff = now.getDate() - day + (day === 0 ? -6 : 1)
-    return new Date(now.setDate(diff))
-  })
-  const [formData, setFormData] = useState({
+  const [selectedDate, setSelectedDate] = useState<Date | null>(null)
+  const [formData, setFormData] = useState<CreateEventRequest>({
     title: '',
     description: '',
-    date: '',
-    time: '12:00',
+    start_at: '',
+    end_at: '',
     all_day: false,
+    color: '#6366f1',
+    shared: true,
   })
+  const [saving, setSaving] = useState(false)
 
   useEffect(() => {
     loadEvents()
-  }, [currentWeekStart])
+  }, [currentDate, view])
 
   const loadEvents = async () => {
     setLoading(true)
     try {
-      const weekEnd = new Date(currentWeekStart)
-      weekEnd.setDate(weekEnd.getDate() + 7)
-
-      const data = await api.events.list(
-        currentWeekStart.toISOString().split('T')[0],
-        weekEnd.toISOString().split('T')[0]
-      )
-      setEvents(data.events)
+      const { from, to } = getDateRange()
+      const resp = await api.events.list({ from, to })
+      setEvents(resp.events || [])
     } catch (err) {
-      console.error('Failed to load events:', err)
+      setError(err instanceof Error ? err.message : 'Ошибка загрузки')
     } finally {
       setLoading(false)
     }
   }
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    try {
-      const startAt = formData.all_day
-        ? `${formData.date}T00:00:00Z`
-        : `${formData.date}T${formData.time}:00Z`
-
-      const endAt = formData.all_day
-        ? `${formData.date}T23:59:59Z`
-        : new Date(new Date(startAt).getTime() + 60 * 60 * 1000).toISOString()
-
-      await api.events.create({
-        title: formData.title,
-        description: formData.description,
-        start_at: startAt,
-        end_at: endAt,
-        all_day: formData.all_day,
-        shared: true,
-      })
-
-      setShowForm(false)
-      setFormData({ title: '', description: '', date: '', time: '12:00', all_day: false })
-      loadEvents()
-    } catch (err) {
-      console.error('Failed to create event:', err)
+  const getDateRange = () => {
+    if (view === 'week') {
+      const start = getWeekStart(currentDate)
+      const end = new Date(start)
+      end.setDate(end.getDate() + 6)
+      return {
+        from: start.toISOString().split('T')[0],
+        to: end.toISOString().split('T')[0],
+      }
+    } else {
+      const start = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1)
+      const end = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0)
+      return {
+        from: start.toISOString().split('T')[0],
+        to: end.toISOString().split('T')[0],
+      }
     }
   }
 
-  const handleDelete = async (id: number) => {
-    if (!confirm('Delete this event?')) return
+  const getWeekStart = (date: Date) => {
+    const d = new Date(date)
+    const day = d.getDay()
+    const diff = d.getDate() - day + (day === 0 ? -6 : 1)
+    return new Date(d.setDate(diff))
+  }
+
+  const getWeekDays = () => {
+    const start = getWeekStart(currentDate)
+    return Array.from({ length: 7 }, (_, i) => {
+      const d = new Date(start)
+      d.setDate(d.getDate() + i)
+      return d
+    })
+  }
+
+  const getMonthDays = () => {
+    const year = currentDate.getFullYear()
+    const month = currentDate.getMonth()
+    const firstDay = new Date(year, month, 1)
+    const lastDay = new Date(year, month + 1, 0)
+    const days: (Date | null)[] = []
+
+    let startPadding = firstDay.getDay() - 1
+    if (startPadding < 0) startPadding = 6
+
+    for (let i = 0; i < startPadding; i++) {
+      days.push(null)
+    }
+
+    for (let i = 1; i <= lastDay.getDate(); i++) {
+      days.push(new Date(year, month, i))
+    }
+
+    return days
+  }
+
+  const getEventsForDate = (date: Date) => {
+    const dateStr = date.toISOString().split('T')[0]
+    return events.filter((e) => e.start_at.split('T')[0] === dateStr)
+  }
+
+  const isToday = (date: Date) => {
+    const today = new Date()
+    return date.toDateString() === today.toDateString()
+  }
+
+  const navigatePrev = () => {
+    const newDate = new Date(currentDate)
+    if (view === 'week') {
+      newDate.setDate(newDate.getDate() - 7)
+    } else {
+      newDate.setMonth(newDate.getMonth() - 1)
+    }
+    setCurrentDate(newDate)
+  }
+
+  const navigateNext = () => {
+    const newDate = new Date(currentDate)
+    if (view === 'week') {
+      newDate.setDate(newDate.getDate() + 7)
+    } else {
+      newDate.setMonth(newDate.getMonth() + 1)
+    }
+    setCurrentDate(newDate)
+  }
+
+  const goToToday = () => {
+    setCurrentDate(new Date())
+  }
+
+  const openAddForm = (date?: Date) => {
+    const d = date || new Date()
+    setSelectedDate(d)
+    const dateStr = d.toISOString().split('T')[0]
+    setFormData({
+      ...formData,
+      start_at: `${dateStr}T12:00`,
+      end_at: `${dateStr}T13:00`,
+    })
+    setShowForm(true)
+  }
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!formData.title.trim() || !formData.start_at) return
+
+    setSaving(true)
+    try {
+      await api.events.create({
+        ...formData,
+        start_at: new Date(formData.start_at).toISOString(),
+        end_at: formData.end_at ? new Date(formData.end_at).toISOString() : undefined,
+      })
+      setShowForm(false)
+      setFormData({
+        title: '',
+        description: '',
+        start_at: '',
+        end_at: '',
+        all_day: false,
+        color: '#6366f1',
+        shared: true,
+      })
+      loadEvents()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Ошибка создания')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const deleteEvent = async (id: number) => {
+    if (!confirm('Удалить событие?')) return
     try {
       await api.events.delete(id)
       loadEvents()
     } catch (err) {
-      console.error('Failed to delete event:', err)
+      setError(err instanceof Error ? err.message : 'Ошибка удаления')
     }
   }
 
-  const previousWeek = () => {
-    const newStart = new Date(currentWeekStart)
-    newStart.setDate(newStart.getDate() - 7)
-    setCurrentWeekStart(newStart)
-  }
-
-  const nextWeek = () => {
-    const newStart = new Date(currentWeekStart)
-    newStart.setDate(newStart.getDate() + 7)
-    setCurrentWeekStart(newStart)
-  }
-
-  const getDaysOfWeek = () => {
-    const days = []
-    for (let i = 0; i < 7; i++) {
-      const day = new Date(currentWeekStart)
-      day.setDate(day.getDate() + i)
-      days.push(day)
-    }
-    return days
-  }
-
-  const getEventsForDay = (day: Date) => {
-    return events.filter(event => {
-      const eventDate = new Date(event.start_at)
-      return eventDate.toDateString() === day.toDateString()
+  const formatTime = (dateStr: string) => {
+    return new Date(dateStr).toLocaleTimeString('ru-RU', {
+      hour: '2-digit',
+      minute: '2-digit',
     })
   }
 
-  const formatWeekRange = () => {
-    const weekEnd = new Date(currentWeekStart)
-    weekEnd.setDate(weekEnd.getDate() + 6)
-    return `${currentWeekStart.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - ${weekEnd.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`
+  const getHeaderTitle = () => {
+    if (view === 'week') {
+      const days = getWeekDays()
+      const start = days[0]
+      const end = days[6]
+      if (start.getMonth() === end.getMonth()) {
+        return `${start.getDate()} - ${end.getDate()} ${monthNames[start.getMonth()]} ${start.getFullYear()}`
+      }
+      return `${start.getDate()} ${monthNames[start.getMonth()].slice(0, 3)} - ${end.getDate()} ${monthNames[end.getMonth()].slice(0, 3)} ${end.getFullYear()}`
+    }
+    return `${monthNames[currentDate.getMonth()]} ${currentDate.getFullYear()}`
   }
 
   return (
-    <div>
-      <div className="flex justify-between items-center mb-6">
-        <h1 className="text-3xl font-bold text-white">Calendar</h1>
-        <button
-          onClick={() => setShowForm(true)}
-          className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded"
-        >
-          New Event
-        </button>
+    <div className="calendar-page">
+      <header className="page-header">
+        <Link to="/" className="back-btn">←</Link>
+        <h1>Календарь</h1>
+        <button onClick={() => openAddForm()} className="add-btn">+</button>
+      </header>
+
+      {error && <div className="error-banner">{error}</div>}
+
+      <div className="calendar-nav">
+        <button onClick={navigatePrev} className="nav-btn">‹</button>
+        <div className="calendar-title">
+          <span>{getHeaderTitle()}</span>
+          <button onClick={goToToday} className="today-btn">Сегодня</button>
+        </div>
+        <button onClick={navigateNext} className="nav-btn">›</button>
       </div>
 
-      <div className="flex justify-between items-center mb-6">
-        <button onClick={previousWeek} className="text-gray-400 hover:text-white px-4 py-2">
-          Previous
+      <div className="view-toggle">
+        <button
+          className={`toggle-btn ${view === 'week' ? 'active' : ''}`}
+          onClick={() => setView('week')}
+        >
+          Неделя
         </button>
-        <span className="text-white font-medium">{formatWeekRange()}</span>
-        <button onClick={nextWeek} className="text-gray-400 hover:text-white px-4 py-2">
-          Next
+        <button
+          className={`toggle-btn ${view === 'month' ? 'active' : ''}`}
+          onClick={() => setView('month')}
+        >
+          Месяц
         </button>
       </div>
 
       {showForm && (
-        <div className="bg-gray-800 rounded-lg p-6 mb-6">
-          <h2 className="text-xl font-semibold text-white mb-4">New Event</h2>
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div>
-              <label className="block text-gray-300 mb-2">Title</label>
+        <div className="modal-overlay" onClick={() => setShowForm(false)}>
+          <form
+            onSubmit={handleSubmit}
+            className="event-form card"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2>Новое событие</h2>
+
+            <div className="form-group">
+              <label>Название</label>
               <input
                 type="text"
                 value={formData.title}
-                onChange={e => setFormData({ ...formData, title: e.target.value })}
-                className="w-full bg-gray-700 text-white px-4 py-2 rounded focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                onChange={(e) => setFormData({ ...formData, title: e.target.value })}
+                placeholder="Что запланировано?"
                 required
               />
             </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-gray-300 mb-2">Date</label>
+
+            <div className="form-row">
+              <div className="form-group">
+                <label>Начало</label>
                 <input
-                  type="date"
-                  value={formData.date}
-                  onChange={e => setFormData({ ...formData, date: e.target.value })}
-                  className="w-full bg-gray-700 text-white px-4 py-2 rounded focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  type="datetime-local"
+                  value={formData.start_at}
+                  onChange={(e) => setFormData({ ...formData, start_at: e.target.value })}
                   required
                 />
               </div>
-              <div>
-                <label className="block text-gray-300 mb-2">Time</label>
+
+              <div className="form-group">
+                <label>Конец</label>
                 <input
-                  type="time"
-                  value={formData.time}
-                  onChange={e => setFormData({ ...formData, time: e.target.value })}
-                  className="w-full bg-gray-700 text-white px-4 py-2 rounded focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  disabled={formData.all_day}
+                  type="datetime-local"
+                  value={formData.end_at}
+                  onChange={(e) => setFormData({ ...formData, end_at: e.target.value })}
                 />
               </div>
             </div>
-            <div className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                id="all_day"
-                checked={formData.all_day}
-                onChange={e => setFormData({ ...formData, all_day: e.target.checked })}
-                className="rounded"
-              />
-              <label htmlFor="all_day" className="text-gray-300">All day event</label>
-            </div>
-            <div>
-              <label className="block text-gray-300 mb-2">Description</label>
+
+            <div className="form-group">
+              <label>Описание</label>
               <textarea
                 value={formData.description}
-                onChange={e => setFormData({ ...formData, description: e.target.value })}
-                className="w-full bg-gray-700 text-white px-4 py-2 rounded focus:outline-none focus:ring-2 focus:ring-indigo-500 h-20"
+                onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                placeholder="Детали (необязательно)"
+                rows={2}
               />
             </div>
-            <div className="flex gap-2">
-              <button type="submit" className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded">
-                Create
+
+            <div className="form-group">
+              <label>Цвет</label>
+              <div className="color-picker">
+                {eventColors.map((c) => (
+                  <button
+                    key={c}
+                    type="button"
+                    className={`color-btn ${formData.color === c ? 'active' : ''}`}
+                    style={{ backgroundColor: c }}
+                    onClick={() => setFormData({ ...formData, color: c })}
+                  />
+                ))}
+              </div>
+            </div>
+
+            <div className="form-actions">
+              <button type="button" onClick={() => setShowForm(false)} className="btn-secondary">
+                Отмена
               </button>
-              <button
-                type="button"
-                onClick={() => setShowForm(false)}
-                className="bg-gray-600 hover:bg-gray-500 text-white px-4 py-2 rounded"
-              >
-                Cancel
+              <button type="submit" className="btn-primary" disabled={saving}>
+                {saving ? 'Сохранение...' : 'Создать'}
               </button>
             </div>
           </form>
@@ -207,47 +322,109 @@ export default function Calendar() {
       )}
 
       {loading ? (
-        <div className="text-gray-400">Loading...</div>
-      ) : (
-        <div className="grid grid-cols-7 gap-2">
-          {getDaysOfWeek().map(day => {
-            const dayEvents = getEventsForDay(day)
-            const isToday = day.toDateString() === new Date().toDateString()
-
-            return (
-              <div
-                key={day.toISOString()}
-                className={`bg-gray-800 rounded-lg p-3 min-h-32 ${isToday ? 'ring-2 ring-indigo-500' : ''}`}
-              >
-                <div className={`text-sm mb-2 ${isToday ? 'text-indigo-400 font-bold' : 'text-gray-400'}`}>
-                  {day.toLocaleDateString('en-US', { weekday: 'short', day: 'numeric' })}
-                </div>
-                <div className="space-y-1">
-                  {dayEvents.map(event => (
-                    <div
-                      key={event.id}
-                      className="bg-indigo-600/30 text-indigo-200 text-xs p-2 rounded group relative"
-                    >
-                      <div className="font-medium">{event.title}</div>
-                      {!event.all_day && (
-                        <div className="text-indigo-300">
-                          {new Date(event.start_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
-                        </div>
-                      )}
-                      <button
-                        onClick={() => handleDelete(event.id)}
-                        className="absolute top-1 right-1 text-red-400 hover:text-red-300 opacity-0 group-hover:opacity-100"
+        <div className="loading">Загрузка...</div>
+      ) : view === 'week' ? (
+        <div className="week-view">
+          <div className="week-header">
+            {weekDays.map((day, i) => (
+              <div key={i} className="week-day-header">{day}</div>
+            ))}
+          </div>
+          <div className="week-grid">
+            {getWeekDays().map((date, i) => {
+              const dayEvents = getEventsForDate(date)
+              return (
+                <div
+                  key={i}
+                  className={`week-day ${isToday(date) ? 'today' : ''}`}
+                  onClick={() => openAddForm(date)}
+                >
+                  <div className="day-number">{date.getDate()}</div>
+                  <div className="day-events">
+                    {dayEvents.map((event) => (
+                      <div
+                        key={event.id}
+                        className="event-chip"
+                        style={{ backgroundColor: event.color || '#6366f1' }}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                        }}
                       >
-                        x
-                      </button>
-                    </div>
-                  ))}
+                        <span className="event-time">{formatTime(event.start_at)}</span>
+                        <span className="event-title">{event.title}</span>
+                        <button
+                          className="delete-btn"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            deleteEvent(event.id)
+                          }}
+                        >
+                          ×
+                        </button>
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              </div>
-            )
-          })}
+              )
+            })}
+          </div>
+        </div>
+      ) : (
+        <div className="month-view">
+          <div className="month-header">
+            {weekDays.map((day, i) => (
+              <div key={i} className="month-day-header">{day}</div>
+            ))}
+          </div>
+          <div className="month-grid">
+            {getMonthDays().map((date, i) => {
+              if (!date) {
+                return <div key={i} className="month-day empty" />
+              }
+              const dayEvents = getEventsForDate(date)
+              return (
+                <div
+                  key={i}
+                  className={`month-day ${isToday(date) ? 'today' : ''}`}
+                  onClick={() => openAddForm(date)}
+                >
+                  <div className="day-number">{date.getDate()}</div>
+                  {dayEvents.length > 0 && (
+                    <div className="event-dots">
+                      {dayEvents.slice(0, 3).map((e) => (
+                        <span
+                          key={e.id}
+                          className="event-dot"
+                          style={{ backgroundColor: e.color || '#6366f1' }}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
         </div>
       )}
+
+      <nav className="bottom-nav">
+        <Link to="/" className="nav-item">
+          <span className="nav-icon">🏠</span>
+          <span>Главная</span>
+        </Link>
+        <Link to="/topics" className="nav-item">
+          <span className="nav-icon">💬</span>
+          <span>Темы</span>
+        </Link>
+        <Link to="/calendar" className="nav-item active">
+          <span className="nav-icon">📅</span>
+          <span>Календарь</span>
+        </Link>
+        <Link to="/notes" className="nav-item">
+          <span className="nav-icon">📝</span>
+          <span>Заметки</span>
+        </Link>
+      </nav>
     </div>
   )
 }

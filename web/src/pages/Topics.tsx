@@ -1,34 +1,55 @@
-import { useEffect, useState } from 'react'
-import { api, Topic } from '../api/client'
+import { useState, useEffect } from 'react'
+import { Link } from 'react-router-dom'
+import { api, Topic, CreateTopicRequest } from '../api/client'
 
 const priorityLabels: Record<number, string> = {
-  0: 'Buffer',
-  1: 'Emergency',
+  0: 'Буфер',
+  1: 'Срочно',
   2: 'ASAP',
-  3: 'Must discuss',
-  4: 'Soon',
-  5: 'When possible',
+  3: 'Надо обсудить',
+  4: 'Скоро',
+  5: 'Когда-нибудь',
 }
+
+const priorityColors: Record<number, string> = {
+  0: '#94a3b8',
+  1: '#ef4444',
+  2: '#f97316',
+  3: '#eab308',
+  4: '#22c55e',
+  5: '#6366f1',
+}
+
+type TabType = 'pending' | 'discussed' | 'all'
 
 export default function Topics() {
   const [topics, setTopics] = useState<Topic[]>([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [activeTab, setActiveTab] = useState<TabType>('pending')
   const [showForm, setShowForm] = useState(false)
-  const [editingTopic, setEditingTopic] = useState<Topic | null>(null)
-  const [formData, setFormData] = useState({ title: '', description: '', priority: 3 })
-  const [filter, setFilter] = useState<'pending' | 'discussed' | 'all'>('pending')
+  const [formData, setFormData] = useState<CreateTopicRequest>({
+    title: '',
+    description: '',
+    priority: 3,
+  })
+  const [saving, setSaving] = useState(false)
 
   useEffect(() => {
     loadTopics()
-  }, [filter])
+  }, [activeTab])
 
   const loadTopics = async () => {
+    setLoading(true)
     try {
-      const status = filter === 'all' ? undefined : filter
-      const data = await api.topics.list(status, 50)
-      setTopics(data.topics)
+      const params: { status?: string; limit: number } = { limit: 50 }
+      if (activeTab !== 'all') {
+        params.status = activeTab
+      }
+      const resp = await api.topics.list(params)
+      setTopics(resp.topics || [])
     } catch (err) {
-      console.error('Failed to load topics:', err)
+      setError(err instanceof Error ? err.message : 'Ошибка загрузки')
     } finally {
       setLoading(false)
     }
@@ -36,179 +57,182 @@ export default function Topics() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (!formData.title.trim()) return
+
+    setSaving(true)
     try {
-      if (editingTopic) {
-        await api.topics.update(editingTopic.id, formData)
-      } else {
-        await api.topics.create(formData)
-      }
-      setShowForm(false)
-      setEditingTopic(null)
+      await api.topics.create(formData)
       setFormData({ title: '', description: '', priority: 3 })
+      setShowForm(false)
       loadTopics()
     } catch (err) {
-      console.error('Failed to save topic:', err)
+      setError(err instanceof Error ? err.message : 'Ошибка создания')
+    } finally {
+      setSaving(false)
     }
   }
 
-  const handleDelete = async (id: number) => {
-    if (!confirm('Delete this topic?')) return
+  const markDiscussed = async (id: number) => {
     try {
-      await api.topics.delete(id)
+      await api.topics.markDiscussed(id)
       loadTopics()
     } catch (err) {
-      console.error('Failed to delete topic:', err)
+      setError(err instanceof Error ? err.message : 'Ошибка')
     }
   }
 
-  const handleMarkDiscussed = async (topic: Topic) => {
-    try {
-      await api.topics.markDiscussed(topic.id)
-      loadTopics()
-    } catch (err) {
-      console.error('Failed to mark as discussed:', err)
-    }
-  }
-
-  const startEdit = (topic: Topic) => {
-    setEditingTopic(topic)
-    setFormData({ title: topic.title, description: topic.description, priority: topic.priority })
-    setShowForm(true)
-  }
-
-  if (loading) {
-    return <div className="text-gray-400">Loading...</div>
+  const formatDate = (dateStr: string) => {
+    return new Date(dateStr).toLocaleDateString('ru-RU', {
+      day: 'numeric',
+      month: 'short',
+    })
   }
 
   return (
-    <div>
-      <div className="flex justify-between items-center mb-6">
-        <h1 className="text-3xl font-bold text-white">Topics</h1>
+    <div className="topics-page">
+      <header className="page-header">
+        <Link to="/" className="back-btn">←</Link>
+        <h1>Темы</h1>
+        <button onClick={() => setShowForm(!showForm)} className="add-btn">
+          {showForm ? '✕' : '+'}
+        </button>
+      </header>
+
+      {error && <div className="error-banner">{error}</div>}
+
+      {showForm && (
+        <form onSubmit={handleSubmit} className="topic-form card">
+          <div className="form-group">
+            <label>Тема</label>
+            <input
+              type="text"
+              value={formData.title}
+              onChange={(e) => setFormData({ ...formData, title: e.target.value })}
+              placeholder="О чём хотите поговорить?"
+              required
+            />
+          </div>
+
+          <div className="form-group">
+            <label>Описание</label>
+            <textarea
+              value={formData.description}
+              onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+              placeholder="Детали (необязательно)"
+              rows={3}
+            />
+          </div>
+
+          <div className="form-group">
+            <label>Приоритет</label>
+            <div className="priority-selector">
+              {[0, 1, 2, 3, 4, 5].map((p) => (
+                <button
+                  key={p}
+                  type="button"
+                  className={`priority-btn ${formData.priority === p ? 'active' : ''}`}
+                  style={{
+                    backgroundColor: formData.priority === p ? priorityColors[p] : 'transparent',
+                    borderColor: priorityColors[p],
+                    color: formData.priority === p ? '#fff' : priorityColors[p],
+                  }}
+                  onClick={() => setFormData({ ...formData, priority: p })}
+                >
+                  {priorityLabels[p]}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <button type="submit" className="btn-primary" disabled={saving}>
+            {saving ? 'Сохранение...' : 'Добавить тему'}
+          </button>
+        </form>
+      )}
+
+      <div className="tabs">
         <button
-          onClick={() => { setShowForm(true); setEditingTopic(null); setFormData({ title: '', description: '', priority: 3 }) }}
-          className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded"
+          className={`tab ${activeTab === 'pending' ? 'active' : ''}`}
+          onClick={() => setActiveTab('pending')}
         >
-          New Topic
+          Ожидают
+        </button>
+        <button
+          className={`tab ${activeTab === 'discussed' ? 'active' : ''}`}
+          onClick={() => setActiveTab('discussed')}
+        >
+          Обсуждённые
+        </button>
+        <button
+          className={`tab ${activeTab === 'all' ? 'active' : ''}`}
+          onClick={() => setActiveTab('all')}
+        >
+          Все
         </button>
       </div>
 
-      <div className="flex gap-2 mb-6">
-        {(['pending', 'discussed', 'all'] as const).map(f => (
-          <button
-            key={f}
-            onClick={() => setFilter(f)}
-            className={`px-4 py-2 rounded ${filter === f ? 'bg-indigo-600 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}`}
-          >
-            {f.charAt(0).toUpperCase() + f.slice(1)}
+      {loading ? (
+        <div className="loading">Загрузка...</div>
+      ) : topics.length === 0 ? (
+        <div className="empty-state">
+          <p>Нет тем</p>
+          <button onClick={() => setShowForm(true)} className="btn-primary">
+            Добавить первую тему
           </button>
-        ))}
-      </div>
-
-      {showForm && (
-        <div className="bg-gray-800 rounded-lg p-6 mb-6">
-          <h2 className="text-xl font-semibold text-white mb-4">
-            {editingTopic ? 'Edit Topic' : 'New Topic'}
-          </h2>
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div>
-              <label className="block text-gray-300 mb-2">Title</label>
-              <input
-                type="text"
-                value={formData.title}
-                onChange={e => setFormData({ ...formData, title: e.target.value })}
-                className="w-full bg-gray-700 text-white px-4 py-2 rounded focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                required
-              />
-            </div>
-            <div>
-              <label className="block text-gray-300 mb-2">Description</label>
-              <textarea
-                value={formData.description}
-                onChange={e => setFormData({ ...formData, description: e.target.value })}
-                className="w-full bg-gray-700 text-white px-4 py-2 rounded focus:outline-none focus:ring-2 focus:ring-indigo-500 h-24"
-              />
-            </div>
-            <div>
-              <label className="block text-gray-300 mb-2">Priority</label>
-              <select
-                value={formData.priority}
-                onChange={e => setFormData({ ...formData, priority: parseInt(e.target.value) })}
-                className="w-full bg-gray-700 text-white px-4 py-2 rounded focus:outline-none focus:ring-2 focus:ring-indigo-500"
-              >
-                {Object.entries(priorityLabels).map(([value, label]) => (
-                  <option key={value} value={value}>{value} - {label}</option>
-                ))}
-              </select>
-            </div>
-            <div className="flex gap-2">
-              <button type="submit" className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded">
-                {editingTopic ? 'Update' : 'Create'}
-              </button>
-              <button
-                type="button"
-                onClick={() => { setShowForm(false); setEditingTopic(null) }}
-                className="bg-gray-600 hover:bg-gray-500 text-white px-4 py-2 rounded"
-              >
-                Cancel
-              </button>
-            </div>
-          </form>
         </div>
-      )}
-
-      {topics.length === 0 ? (
-        <div className="text-gray-500 text-center py-8">No topics found</div>
       ) : (
-        <div className="space-y-4">
-          {topics.map(topic => (
-            <div key={topic.id} className="bg-gray-800 rounded-lg p-4">
-              <div className="flex justify-between items-start">
-                <div className="flex-1">
-                  <div className="flex items-center gap-2">
-                    <h3 className={`text-lg font-medium ${topic.status === 'discussed' ? 'text-gray-500 line-through' : 'text-white'}`}>
-                      {topic.title}
-                    </h3>
-                    <span className="bg-indigo-500/20 text-indigo-400 text-xs px-2 py-1 rounded">
-                      P{topic.priority} - {priorityLabels[topic.priority]}
-                    </span>
-                    <span className={`text-xs px-2 py-1 rounded ${topic.status === 'pending' ? 'bg-yellow-500/20 text-yellow-400' : 'bg-green-500/20 text-green-400'}`}>
-                      {topic.status}
-                    </span>
-                  </div>
-                  {topic.description && (
-                    <p className="text-gray-400 mt-2">{topic.description}</p>
-                  )}
-                  <p className="text-gray-500 text-sm mt-2">
-                    Created {new Date(topic.created_at).toLocaleDateString()}
-                  </p>
-                </div>
-                <div className="flex gap-2 ml-4">
-                  {topic.status === 'pending' && (
-                    <button
-                      onClick={() => handleMarkDiscussed(topic)}
-                      className="text-green-400 hover:text-green-300 text-sm"
-                    >
-                      Mark Discussed
-                    </button>
-                  )}
-                  <button
-                    onClick={() => startEdit(topic)}
-                    className="text-indigo-400 hover:text-indigo-300 text-sm"
-                  >
-                    Edit
-                  </button>
-                  <button
-                    onClick={() => handleDelete(topic.id)}
-                    className="text-red-400 hover:text-red-300 text-sm"
-                  >
-                    Delete
-                  </button>
-                </div>
+        <ul className="topics-list-full">
+          {topics.map((topic) => (
+            <li key={topic.id} className="topic-card card">
+              <div className="topic-header">
+                <span
+                  className="priority-badge"
+                  style={{ backgroundColor: priorityColors[topic.priority] }}
+                >
+                  {priorityLabels[topic.priority]}
+                </span>
+                <span className="topic-date">{formatDate(topic.created_at)}</span>
               </div>
-            </div>
+              <h3 className="topic-title">{topic.title}</h3>
+              {topic.description && (
+                <p className="topic-description">{topic.description}</p>
+              )}
+              {topic.status === 'pending' && (
+                <button
+                  onClick={() => markDiscussed(topic.id)}
+                  className="btn-success"
+                >
+                  Обсудили ✓
+                </button>
+              )}
+              {topic.status === 'discussed' && topic.discussed_at && (
+                <p className="discussed-date">
+                  Обсуждено: {formatDate(topic.discussed_at)}
+                </p>
+              )}
+            </li>
           ))}
-        </div>
+        </ul>
       )}
+
+      <nav className="bottom-nav">
+        <Link to="/" className="nav-item">
+          <span className="nav-icon">🏠</span>
+          <span>Главная</span>
+        </Link>
+        <Link to="/topics" className="nav-item active">
+          <span className="nav-icon">💬</span>
+          <span>Темы</span>
+        </Link>
+        <Link to="/calendar" className="nav-item">
+          <span className="nav-icon">📅</span>
+          <span>Календарь</span>
+        </Link>
+        <Link to="/notes" className="nav-item">
+          <span className="nav-icon">📝</span>
+          <span>Заметки</span>
+        </Link>
+      </nav>
     </div>
   )
 }

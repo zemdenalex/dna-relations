@@ -9,12 +9,12 @@ import (
 func MainMenu() tgbotapi.ReplyKeyboardMarkup {
 	return tgbotapi.NewReplyKeyboard(
 		tgbotapi.NewKeyboardButtonRow(
-			tgbotapi.NewKeyboardButton("Topics"),
-			tgbotapi.NewKeyboardButton("Calendar"),
+			tgbotapi.NewKeyboardButton("Темы"),
+			tgbotapi.NewKeyboardButton("Календарь"),
 		),
 		tgbotapi.NewKeyboardButtonRow(
-			tgbotapi.NewKeyboardButton("Notes"),
-			tgbotapi.NewKeyboardButton("Open App"),
+			tgbotapi.NewKeyboardButton("Заметки"),
+			tgbotapi.NewKeyboardButton("Приложение"),
 		),
 	)
 }
@@ -23,12 +23,15 @@ func MainMenuWithWebApp(webappURL string) tgbotapi.ReplyKeyboardMarkup {
 	return tgbotapi.ReplyKeyboardMarkup{
 		Keyboard: [][]tgbotapi.KeyboardButton{
 			{
-				tgbotapi.NewKeyboardButton("Topics"),
-				tgbotapi.NewKeyboardButton("Calendar"),
+				tgbotapi.NewKeyboardButton("Темы"),
+				tgbotapi.NewKeyboardButton("Календарь"),
 			},
 			{
-				tgbotapi.NewKeyboardButton("Notes"),
-				tgbotapi.NewKeyboardButton("Open App"),
+				tgbotapi.NewKeyboardButton("Заметки"),
+				{
+					Text:   "Приложение",
+					WebApp: &tgbotapi.WebAppInfo{URL: webappURL},
+				},
 			},
 		},
 		ResizeKeyboard: true,
@@ -38,8 +41,8 @@ func MainMenuWithWebApp(webappURL string) tgbotapi.ReplyKeyboardMarkup {
 func TopicsMenu() tgbotapi.InlineKeyboardMarkup {
 	return tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("View All", "topics_list"),
-			tgbotapi.NewInlineKeyboardButtonData("Add New", "topics_add"),
+			tgbotapi.NewInlineKeyboardButtonData("Все", "topics_list"),
+			tgbotapi.NewInlineKeyboardButtonData("Добавить", "topics_add"),
 		),
 	)
 }
@@ -54,32 +57,34 @@ type TopicInfo struct {
 func TopicsMenuExtended(topics []TopicInfo) tgbotapi.InlineKeyboardMarkup {
 	rows := [][]tgbotapi.InlineKeyboardButton{
 		{
-			tgbotapi.NewInlineKeyboardButtonData("Pending", "topics_list"),
-			tgbotapi.NewInlineKeyboardButtonData("Discussed", "topics_discussed"),
-			tgbotapi.NewInlineKeyboardButtonData("Add", "topics_add"),
+			tgbotapi.NewInlineKeyboardButtonData("Ожидают", "topics_list"),
+			tgbotapi.NewInlineKeyboardButtonData("Обсуждённые", "topics_discussed"),
+			tgbotapi.NewInlineKeyboardButtonData("+", "topics_add"),
 		},
 	}
+
 	for _, t := range topics {
 		if t.Status == "pending" {
 			rows = append(rows, tgbotapi.NewInlineKeyboardRow(
 				tgbotapi.NewInlineKeyboardButtonData(
-					fmt.Sprintf("Mark discussed: %s", truncate(t.Title, 20)),
+					fmt.Sprintf("✓ %s", truncate(t.Title, 25)),
 					fmt.Sprintf("topic_discuss:%d", t.ID),
 				),
 			))
 		}
 	}
+
 	return tgbotapi.NewInlineKeyboardMarkup(rows...)
 }
 
 func CalendarMenu() tgbotapi.InlineKeyboardMarkup {
 	return tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("Today", "calendar_today"),
-			tgbotapi.NewInlineKeyboardButtonData("This Week", "calendar_week"),
+			tgbotapi.NewInlineKeyboardButtonData("Сегодня", "calendar_today"),
+			tgbotapi.NewInlineKeyboardButtonData("Неделя", "calendar_week"),
 		),
 		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("Add Event", "calendar_add"),
+			tgbotapi.NewInlineKeyboardButtonData("Добавить", "calendar_add"),
 		),
 	)
 }
@@ -87,8 +92,8 @@ func CalendarMenu() tgbotapi.InlineKeyboardMarkup {
 func NotesMenu() tgbotapi.InlineKeyboardMarkup {
 	return tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("View All", "notes_list"),
-			tgbotapi.NewInlineKeyboardButtonData("Add New", "notes_add"),
+			tgbotapi.NewInlineKeyboardButtonData("Все", "notes_list"),
+			tgbotapi.NewInlineKeyboardButtonData("Добавить", "notes_add"),
 		),
 	)
 }
@@ -96,9 +101,9 @@ func NotesMenu() tgbotapi.InlineKeyboardMarkup {
 func NotesMenuExtended() tgbotapi.InlineKeyboardMarkup {
 	return tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("All", "notes_list"),
-			tgbotapi.NewInlineKeyboardButtonData("Rules", "notes_rules"),
-			tgbotapi.NewInlineKeyboardButtonData("Add", "notes_add"),
+			tgbotapi.NewInlineKeyboardButtonData("Все", "notes_list"),
+			tgbotapi.NewInlineKeyboardButtonData("Правила", "notes_rules"),
+			tgbotapi.NewInlineKeyboardButtonData("+", "notes_add"),
 		),
 	)
 }
@@ -106,14 +111,18 @@ func NotesMenuExtended() tgbotapi.InlineKeyboardMarkup {
 func WebAppButton(url string) tgbotapi.InlineKeyboardMarkup {
 	return tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonURL("Open DNA App", url),
+			tgbotapi.InlineKeyboardButton{
+				Text:   "Открыть приложение",
+				WebApp: &tgbotapi.WebAppInfo{URL: url},
+			},
 		),
 	)
 }
 
 func truncate(s string, maxLen int) string {
-	if len(s) <= maxLen {
+	runes := []rune(s)
+	if len(runes) <= maxLen {
 		return s
 	}
-	return s[:maxLen-3] + "..."
+	return string(runes[:maxLen-3]) + "..."
 }

@@ -1,13 +1,33 @@
-import { useEffect, useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { api, Topic, CalendarEvent, Note } from '../api/client'
+import { useAuth } from '../contexts/AuthContext'
+
+const priorityLabels: Record<number, string> = {
+  0: 'Буфер',
+  1: 'Срочно',
+  2: 'ASAP',
+  3: 'Надо обсудить',
+  4: 'Скоро',
+  5: 'Когда-нибудь',
+}
+
+const priorityColors: Record<number, string> = {
+  0: '#94a3b8',
+  1: '#ef4444',
+  2: '#f97316',
+  3: '#eab308',
+  4: '#22c55e',
+  5: '#6366f1',
+}
 
 export default function Dashboard() {
-  const [stats, setStats] = useState({ topicCount: 0, eventCount: 0, noteCount: 0 })
-  const [pendingTopics, setPendingTopics] = useState<Topic[]>([])
-  const [upcomingEvents, setUpcomingEvents] = useState<CalendarEvent[]>([])
-  const [pinnedNotes, setPinnedNotes] = useState<Note[]>([])
+  const { user, logout } = useAuth()
+  const [topics, setTopics] = useState<Topic[]>([])
+  const [events, setEvents] = useState<CalendarEvent[]>([])
+  const [notes, setNotes] = useState<Note[]>([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
 
   useEffect(() => {
     loadData()
@@ -15,127 +35,151 @@ export default function Dashboard() {
 
   const loadData = async () => {
     try {
-      const now = new Date()
-      const weekEnd = new Date(now)
-      weekEnd.setDate(weekEnd.getDate() + 7)
+      const today = new Date()
+      const nextWeek = new Date(today)
+      nextWeek.setDate(nextWeek.getDate() + 7)
 
-      const [topicsRes, eventsRes, notesRes] = await Promise.all([
-        api.topics.list('pending', 10),
-        api.events.list(now.toISOString().split('T')[0], weekEnd.toISOString().split('T')[0]),
-        api.notes.list(undefined, 50),
+      const [topicsResp, eventsResp, notesResp] = await Promise.all([
+        api.topics.list({ status: 'pending', limit: 5 }),
+        api.events.list({
+          from: today.toISOString().split('T')[0],
+          to: nextWeek.toISOString().split('T')[0],
+        }),
+        api.notes.list({ limit: 5 }),
       ])
 
-      const pinned = notesRes.notes.filter(n => n.is_pinned)
-
-      setStats({
-        topicCount: topicsRes.topics.length,
-        eventCount: eventsRes.events.length,
-        noteCount: notesRes.total,
-      })
-
-      setPendingTopics(topicsRes.topics.slice(0, 5))
-      setUpcomingEvents(eventsRes.events.slice(0, 5))
-      setPinnedNotes(pinned.slice(0, 5))
+      setTopics(topicsResp.topics || [])
+      setEvents(eventsResp.events || [])
+      setNotes(notesResp.notes || [])
     } catch (err) {
-      console.error('Failed to load dashboard data:', err)
+      setError(err instanceof Error ? err.message : 'Ошибка загрузки')
     } finally {
       setLoading(false)
     }
   }
 
+  const formatDate = (dateStr: string) => {
+    const date = new Date(dateStr)
+    const today = new Date()
+    const tomorrow = new Date(today)
+    tomorrow.setDate(tomorrow.getDate() + 1)
+
+    if (date.toDateString() === today.toDateString()) return 'Сегодня'
+    if (date.toDateString() === tomorrow.toDateString()) return 'Завтра'
+
+    return date.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })
+  }
+
+  const formatTime = (dateStr: string) => {
+    return new Date(dateStr).toLocaleTimeString('ru-RU', {
+      hour: '2-digit',
+      minute: '2-digit',
+    })
+  }
+
   if (loading) {
-    return <div className="text-gray-400">Loading...</div>
+    return <div className="loading">Загрузка...</div>
   }
 
   return (
-    <div>
-      <h1 className="text-3xl font-bold text-white mb-2">Dashboard</h1>
-      <p className="text-gray-400 mb-8">Welcome to DNA Relations</p>
+    <div className="dashboard">
+      <header className="dashboard-header">
+        <div className="header-content">
+          <h1>Привет, {user?.username}</h1>
+          <button onClick={logout} className="btn-text">Выйти</button>
+        </div>
+      </header>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
-        <StatCard title="Topics" value={stats.topicCount} subtitle="pending" to="/topics" />
-        <StatCard title="Events" value={stats.eventCount} subtitle="this week" to="/calendar" />
-        <StatCard title="Notes" value={stats.noteCount} subtitle="total" to="/notes" />
-      </div>
+      {error && <div className="error-banner">{error}</div>}
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <Section title="Priority Topics" to="/topics">
-          {pendingTopics.length === 0 ? (
-            <p className="text-gray-500">No pending topics</p>
+      <div className="dashboard-grid">
+        <section className="card topics-card">
+          <div className="card-header">
+            <h2>Темы для обсуждения</h2>
+            <Link to="/topics" className="btn-link">Все</Link>
+          </div>
+          {topics.length === 0 ? (
+            <p className="empty-state">Нет ожидающих тем</p>
           ) : (
-            <ul className="space-y-2">
-              {pendingTopics.map(topic => (
-                <li key={topic.id} className="text-gray-300">
-                  <span className="text-indigo-400 mr-2">[P{topic.priority}]</span>
-                  {topic.title}
+            <ul className="topics-list">
+              {topics.map((topic) => (
+                <li key={topic.id} className="topic-item">
+                  <span
+                    className="priority-badge"
+                    style={{ backgroundColor: priorityColors[topic.priority] }}
+                  >
+                    {priorityLabels[topic.priority]}
+                  </span>
+                  <span className="topic-title">{topic.title}</span>
                 </li>
               ))}
             </ul>
           )}
-        </Section>
+          <Link to="/topics" className="btn-secondary">Добавить тему</Link>
+        </section>
 
-        <Section title="Upcoming Events" to="/calendar">
-          {upcomingEvents.length === 0 ? (
-            <p className="text-gray-500">No upcoming events</p>
+        <section className="card calendar-card">
+          <div className="card-header">
+            <h2>Ближайшие события</h2>
+            <Link to="/calendar" className="btn-link">Календарь</Link>
+          </div>
+          {events.length === 0 ? (
+            <p className="empty-state">Нет событий на неделю</p>
           ) : (
-            <ul className="space-y-2">
-              {upcomingEvents.map(event => {
-                const date = new Date(event.start_at)
-                return (
-                  <li key={event.id} className="text-gray-300">
-                    <span className="text-indigo-400 mr-2">
-                      {date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
-                    </span>
-                    {event.title}
-                  </li>
-                )
-              })}
-            </ul>
-          )}
-        </Section>
-
-        <Section title="Pinned Notes" to="/notes" className="md:col-span-2">
-          {pinnedNotes.length === 0 ? (
-            <p className="text-gray-500">No pinned notes</p>
-          ) : (
-            <ul className="space-y-2">
-              {pinnedNotes.map(note => (
-                <li key={note.id} className="text-gray-300">
-                  <span className="mr-2">📌</span>
-                  <span className="font-medium">{note.title}</span>
-                  {note.content && (
-                    <span className="text-gray-500 ml-2">
-                      - {note.content.substring(0, 50)}{note.content.length > 50 ? '...' : ''}
-                    </span>
-                  )}
+            <ul className="events-list">
+              {events.slice(0, 5).map((event) => (
+                <li key={event.id} className="event-item">
+                  <div className="event-date">{formatDate(event.start_at)}</div>
+                  <div className="event-info">
+                    <span className="event-time">{formatTime(event.start_at)}</span>
+                    <span className="event-title">{event.title}</span>
+                  </div>
                 </li>
               ))}
             </ul>
           )}
-        </Section>
-      </div>
-    </div>
-  )
-}
+          <Link to="/calendar" className="btn-secondary">Открыть календарь</Link>
+        </section>
 
-function StatCard({ title, value, subtitle, to }: { title: string; value: number; subtitle: string; to: string }) {
-  return (
-    <Link to={to} className="bg-gray-800 rounded-lg p-6 hover:bg-gray-750 transition-colors">
-      <div className="text-gray-400 text-sm">{title}</div>
-      <div className="text-3xl font-bold text-white mt-1">{value}</div>
-      <div className="text-gray-500 text-sm">{subtitle}</div>
-    </Link>
-  )
-}
-
-function Section({ title, to, children, className = '' }: { title: string; to: string; children: React.ReactNode; className?: string }) {
-  return (
-    <div className={`bg-gray-800 rounded-lg p-6 ${className}`}>
-      <div className="flex justify-between items-center mb-4">
-        <h2 className="text-xl font-semibold text-white">{title}</h2>
-        <Link to={to} className="text-indigo-400 hover:text-indigo-300 text-sm">View all</Link>
+        <section className="card notes-card">
+          <div className="card-header">
+            <h2>Заметки</h2>
+            <Link to="/notes" className="btn-link">Все</Link>
+          </div>
+          {notes.length === 0 ? (
+            <p className="empty-state">Нет заметок</p>
+          ) : (
+            <ul className="notes-list">
+              {notes.map((note) => (
+                <li key={note.id} className="note-item">
+                  {note.is_pinned && <span className="pin-icon">📌</span>}
+                  <span className="note-title">{note.title || note.content.slice(0, 50)}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+          <Link to="/notes" className="btn-secondary">Добавить заметку</Link>
+        </section>
       </div>
-      {children}
+
+      <nav className="bottom-nav">
+        <Link to="/" className="nav-item active">
+          <span className="nav-icon">🏠</span>
+          <span>Главная</span>
+        </Link>
+        <Link to="/topics" className="nav-item">
+          <span className="nav-icon">💬</span>
+          <span>Темы</span>
+        </Link>
+        <Link to="/calendar" className="nav-item">
+          <span className="nav-icon">📅</span>
+          <span>Календарь</span>
+        </Link>
+        <Link to="/notes" className="nav-item">
+          <span className="nav-icon">📝</span>
+          <span>Заметки</span>
+        </Link>
+      </nav>
     </div>
   )
 }

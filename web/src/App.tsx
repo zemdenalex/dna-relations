@@ -1,21 +1,16 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider, useAuth } from './contexts/AuthContext'
-import Layout from './components/Layout'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import Topics from './pages/Topics'
 import Calendar from './pages/Calendar'
 import Notes from './pages/Notes'
 
-function ProtectedRoute({ children }: { children: React.ReactNode }) {
+function PrivateRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth()
 
   if (loading) {
-    return (
-      <div className="min-h-screen bg-gray-900 flex items-center justify-center">
-        <div className="text-white">Loading...</div>
-      </div>
-    )
+    return <div className="loading-screen">Загрузка...</div>
   }
 
   if (!user) {
@@ -25,60 +20,64 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>
 }
 
-function AppRoutes() {
+function PublicRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth()
 
   if (loading) {
-    return (
-      <div className="min-h-screen bg-gray-900 flex items-center justify-center">
-        <div className="text-white">Loading...</div>
-      </div>
-    )
+    return <div className="loading-screen">Загрузка...</div>
   }
 
+  if (user) {
+    return <Navigate to="/" replace />
+  }
+
+  return <>{children}</>
+}
+
+function AppRoutes() {
   return (
     <Routes>
-      <Route path="/login" element={user ? <Navigate to="/" replace /> : <Login />} />
+      <Route
+        path="/login"
+        element={
+          <PublicRoute>
+            <Login />
+          </PublicRoute>
+        }
+      />
       <Route
         path="/"
         element={
-          <ProtectedRoute>
-            <Layout>
-              <Dashboard />
-            </Layout>
-          </ProtectedRoute>
+          <PrivateRoute>
+            <Dashboard />
+          </PrivateRoute>
         }
       />
       <Route
         path="/topics"
         element={
-          <ProtectedRoute>
-            <Layout>
-              <Topics />
-            </Layout>
-          </ProtectedRoute>
+          <PrivateRoute>
+            <Topics />
+          </PrivateRoute>
         }
       />
       <Route
         path="/calendar"
         element={
-          <ProtectedRoute>
-            <Layout>
-              <Calendar />
-            </Layout>
-          </ProtectedRoute>
+          <PrivateRoute>
+            <Calendar />
+          </PrivateRoute>
         }
       />
       <Route
         path="/notes"
         element={
-          <ProtectedRoute>
-            <Layout>
-              <Notes />
-            </Layout>
-          </ProtectedRoute>
+          <PrivateRoute>
+            <Notes />
+          </PrivateRoute>
         }
       />
+      <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   )
 }
