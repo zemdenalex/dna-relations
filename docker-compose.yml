@@ -70,7 +70,7 @@ services:
     container_name: dna-bot
     environment:
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
-      API_BASE_URL: http://api:9000
+      API_BASE: http://api:9000
       WEBAPP_URL: ${WEBAPP_URL:-https://dna-relations.website/miniapp}
       TZ: ${TZ:-Europe/Moscow}
     depends_on:
