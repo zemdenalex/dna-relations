@@ -19,7 +19,6 @@ export default function Calendar() {
   const [currentDate, setCurrentDate] = useState(new Date())
   const [view, setView] = useState<'week' | 'month'>('week')
   const [showForm, setShowForm] = useState(false)
-  const [selectedDate, setSelectedDate] = useState<Date | null>(null)
   const [formData, setFormData] = useState<CreateEventRequest>({
     title: '',
     description: '',
@@ -140,7 +139,6 @@ export default function Calendar() {
 
   const openAddForm = (date?: Date) => {
     const d = date || new Date()
-    setSelectedDate(d)
     const dateStr = d.toISOString().split('T')[0]
     setFormData({
       ...formData,
