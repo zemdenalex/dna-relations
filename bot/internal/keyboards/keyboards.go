@@ -28,10 +28,7 @@ func MainMenuWithWebApp(webappURL string) tgbotapi.ReplyKeyboardMarkup {
 			},
 			{
 				tgbotapi.NewKeyboardButton("Заметки"),
-				{
-					Text:   "Приложение",
-					WebApp: &tgbotapi.WebAppInfo{URL: webappURL},
-				},
+				tgbotapi.NewKeyboardButton("Приложение"),
 			},
 		},
 		ResizeKeyboard: true,
@@ -111,10 +108,7 @@ func NotesMenuExtended() tgbotapi.InlineKeyboardMarkup {
 func WebAppButton(url string) tgbotapi.InlineKeyboardMarkup {
 	return tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.InlineKeyboardButton{
-				Text:   "Открыть приложение",
-				WebApp: &tgbotapi.WebAppInfo{URL: url},
-			},
+			tgbotapi.NewInlineKeyboardButtonURL("Открыть приложение", url),
 		),
 	)
 }

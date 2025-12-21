@@ -4,8 +4,8 @@
 
 1. **Database tables missing** - migrations now create all required tables
 2. **Web auth broken** - token now stored in localStorage and sent with requests
-3. **Bot WebApp button** - now uses native Telegram Mini App WebAppInfo
-4. **Russian language** - all UI text translated to Russian
+3. **Bot Russian text** - all bot messages in Russian
+4. **Russian language UI** - all web UI text translated to Russian
 5. **Calendar UI** - improved weekly/monthly view with better UX
 
 ## Quick Deploy (on server)
@@ -20,7 +20,7 @@ tar -xzvf dna-fix.tar.gz
 # Copy web files
 cp -r dna-fix/web/src/* web/src/
 
-# Copy bot files
+# Copy bot files  
 cp dna-fix/bot/go.mod bot/
 cp -r dna-fix/bot/internal/* bot/internal/
 
@@ -57,20 +57,7 @@ if (authToken) {
 }
 ```
 
-### 3. Fix Bot WebApp Button (keyboards.go)
-Uses OvyFlash fork with WebApp support:
-```go
-// go.mod
-replace github.com/go-telegram-bot-api/telegram-bot-api/v5 => github.com/OvyFlash/telegram-bot-api v0.0.0-20241219171906-3d6d45ae13e7
-
-// keyboards.go - native WebApp button
-{
-  Text:   "Приложение",
-  WebApp: &tgbotapi.WebAppInfo{URL: webappURL},
-}
-```
-
-### 4. Rebuild
+### 3. Rebuild
 ```bash
 docker compose rm -f web bot
 docker compose up -d --build
@@ -91,8 +78,8 @@ docker compose up -d --build
 - `web/src/main.tsx` - entry point
 
 ### Bot
-- `bot/go.mod` - telegram-bot-api fork with WebApp
-- `bot/internal/keyboards/keyboards.go` - WebApp buttons
+- `bot/go.mod` - standard telegram-bot-api v5.5.1
+- `bot/internal/keyboards/keyboards.go` - URL buttons + Russian text
 - `bot/internal/handlers/handlers.go` - Russian messages
 - `bot/internal/api/client.go` - API client
 
@@ -101,7 +88,7 @@ docker compose up -d --build
 1. Open https://dna-relations.site
 2. Login with denis/3141
 3. Test: create topic, add event, create note
-4. Test bot: /start, /login, /topics, use "Приложение" button
+4. Test bot: /start, /login, /topics
 
 ## Troubleshooting
 
@@ -114,6 +101,12 @@ docker compose up -d --build
 - Tables not created: run migrations
 - Check: `docker exec dna-postgres psql -U dna -d dna -c "\dt"`
 
-**Bot button not WebApp?**
-- Ensure go.mod has the replace directive
-- Rebuild: `docker compose rm -f bot && docker compose up -d --build bot`
+**Bot not building?**
+- Ensure go.mod has standard library (no replace directive)
+- Run: `docker compose rm -f bot && docker compose up -d --build bot`
+
+## Note on Telegram Mini App
+
+The bot uses URL buttons to open the web app (opens in browser). Native Telegram Mini App (WebAppInfo) requires a newer telegram-bot-api version than v5.5.1. For native Mini App support, you would need to:
+1. Use `github.com/OvyFlash/telegram-bot-api` or wait for v6
+2. Or configure a Main Mini App in @BotFather
